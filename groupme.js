@@ -1,33 +1,57 @@
-const IMAGE_LINK_BEGINNING = '';
+const axios = require('axios');
+const vision = require('@google-cloud/vision');
+const visionClient = new vision.ImageAnnotatorClient();
+const BASE_URL = 'https://api.groupme.com/v3';
 
-
-async function requestMessagesFromAllGroups(){
-
+const statusCodes = {
+    'OK': 200
 }
 
-async function requestMessages(){
-
+const endpoints = {
+    'groups': '/groups',
+    'messages': '/messages',
+    'bots': '/bots/post'
 }
 
-function getImageLink(message){
-    if (message == null) {
-        
+module.exports.getGroupChats = async function (params) {
+    let groupChats = undefined;
+    try {
+        const url = `${BASE_URL}${endpoints.groups}`;
+        const response = await axios.get(url, { params });
+        if (response.status === statusCodes.OK) {
+            groupChats = response.data;
+        }
+    } catch (error) {
+        console.log(error.message);
     }
+    return groupChats;
 }
 
-function hasImageLink(message){
-    if (message == null){
-        return false;
+module.exports.getMessages = async function (params) {
+    let messages = undefined;
+    let {groupId, ...requestParams} = params;
+    const url = `${BASE_URL}${endpoints.groups}/${groupId}${endpoints.messages}`;
+    try {
+        const response = await axios.get(url, { 'params' : requestParams });
+        if (response.status === statusCodes.OK) {
+            messages = response.data.response.messages;
+        }
+    } catch (error) {
+        console.log(error.message);
     }
+    return messages;
+}
 
-    if (isImageLink(message.text)){
-        return true;
+module.exports.postMessage = async function (params) {
+    const { token, ...botData } = params;
+    const requestParams = { 'token': token };
+    const url = `${BASE_URL}${endpoints.bots}`;
+    let didSend = false;
+    try {
+        const response = await axios.post(url, botData, { 'params' : requestParams });
+        didSend = response.status === statusCodes.OK;
+    } catch (error) {
+        console.log(error);
     }
-    const attachments = message.attachments;
-
-    if (attachments.length > 0) {
-        
-        return attachments.some(attachment => attachment.type === 'image' && attachment.url !== undefined);
-    }
-    return false;
+    return didSend;
 }
