@@ -1,6 +1,5 @@
-
-const vision = require('@google-cloud/vision');
-const visionClient = new vision.ImageAnnotatorClient();
+//const vision = require('@google-cloud/vision');
+//const visionClient = new vision.ImageAnnotatorClient();
 
 const HTTP_URL_SCHEME = 'http';
 const EVENTBRITE = 'eventbrite';
@@ -8,7 +7,7 @@ const IMAGE_URL_REGEX = /https:\/\/i.groupme.com\/\d{0,5}x\d{0,5}.(jpeg|png).[A-
 const DELIMINATOR_REGEX = /[\s\n]/g;
 
 
-module.exports.getEventbriteLinks = function (messages) {
+export function getEventbriteLinks(messages) {
     if (messages == null) {
         return undefined;
     }
@@ -27,7 +26,7 @@ function isEventbriteLink(link) {
 }
 
 
-module.exports.getLinks = async function (messages) {
+async function getLinks(messages) {
     if (messages == null) {
         return null;
     }
@@ -61,8 +60,7 @@ function getImageLinks(messages) {
     const imageLinks = messagesWithImageLinks.map(getImageUrl);
     return imageLinks;
 }
-
-module.exports.hasImage = function (message) {
+function hasImage(message) {
     if (!(message && message.text)) {
         return false;
     }
@@ -78,7 +76,7 @@ module.exports.hasImage = function (message) {
     return hasImage;
 }
 
-module.exports.getImageUrl = function (message) {
+function getImageUrl(message) {
     if (!(message && message.text)) {
         return null;
     }

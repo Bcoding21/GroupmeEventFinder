@@ -1,9 +1,10 @@
-const fs = require('fs');
-const config = require('./config');
-const constants = require('./constants');
-const groupme = require('./groupme');
-const finder = require('./finder');
+import * as fs from 'fs';
+import * as config from './config.mjs';
+import * as constants from './constants.mjs';
+import * as groupme from './groupme.mjs'
+import * as finder from './finder.mjs';
 const ITEM_SEPARATOR = '\n';
+
 
 main();
 
@@ -20,14 +21,14 @@ async function main() {
     let seenLinks = readSeenLinks();
 
     while (true) {
-        
-        const groupsMessages = await Promise.all(groupIds.map( async groupId => {
+
+        const groupsMessages = await Promise.all(groupIds.map(async groupId => {
             const lastMessageId = groupIdToLastMessageId[groupId];
             const groupMessages = await groupme.getMessages({
-                'groupId' : groupId,
-                'token' : config.GROUPME_TOKEN,
-                'limit' : constants.paramValues.limit,
-                'after_id' : lastMessageId
+                'groupId': groupId,
+                'token': config.GROUPME_TOKEN,
+                'limit': constants.paramValues.limit,
+                'after_id': lastMessageId
             });
             return groupMessages;
         }));
@@ -43,21 +44,31 @@ async function main() {
         const eventbriteLinks = finder.getEventbriteLinks(messages);
         const uniqueLinks = getUniqueLinks(eventbriteLinks, seenLinks);
 
-       if (uniqueLinks.length > 0) {
-            uniqueLinks.forEach(link => groupme.postMessage({
-                'token' : config.GROUPME_TOKEN,
-                'bot_id' : config.BOT_ID,
-                'text' : link
-            }));
-
+        if (uniqueLinks.length > 0) {
             seenLinks = new Set([...seenLinks, ...uniqueLinks]);
             writeSeenLinks(uniqueLinks);
+            
+            const unsentLinks = [];
+            for (const link of uniqueLinks){
+                let linkDidSend = false;
+                try {
+                    linkDidSend = groupme.postMessage({
+                        'token' : config.GROUPME_TOKEN,
+                        'bot_id' : config.BOT_ID,
+                        'text' : link
+                    });
+                } catch (error) {
+                    console.log(`Could not send post link.\nReason: ${error.message}`);
+                }
 
+                if (linkDidSend == false){
+                    unsentLinks.push(link);
+                }
+            }
         }
         await new Promise(resolve => setTimeout(resolve, config.WAIT_TIME));
     }
 }
-
 
 function readGroupIds() {
     const idsBuffer = fs.readFileSync(config.GROUP_IDS_PATH);
@@ -67,7 +78,7 @@ function readGroupIds() {
 }
 
 function readLastMessageIds() {
-    if (fs.existsSync(config.LAST_MESSAGE_IDS_PATH)){
+    if (fs.existsSync(config.LAST_MESSAGE_IDS_PATH)) {
         const idsBuffer = fs.readFileSync(config.LAST_MESSAGE_IDS_PATH);
         const idsAsString = idsBuffer.toString();
         const groupIdsToLastMessageIds = JSON.parse(idsAsString);
@@ -109,10 +120,10 @@ function writeGroupIds(groupChatIds) {
     fs.writeFileSync(config.GROUP_IDS_PATH, ids);
 }
 
-function updateLastMessageIds(groupIds, groupsMessages, groupIdToLastMessageId){
-    groupIds.forEach ( ( groupId, index ) => {
+function updateLastMessageIds(groupIds, groupsMessages, groupIdToLastMessageId) {
+    groupIds.forEach((groupId, index) => {
         const messages = groupsMessages[index];
-        if ( messages != null && messages.length > 0){
+        if (messages != null && messages.length > 0) {
             const lastMessageId = messages[messages.length - 1].id;
             groupIdToLastMessageId[groupId] = lastMessageId;
         }
@@ -129,6 +140,13 @@ function getUniqueLinks(foundLinks, seenLinks) {
     return [...linkSet];
 }
 
+async function mapImageWithText(imageLink) {
+    const imageText = await getImageText(imageLink);
+    return {
+        'text': imageText,
+        'link': imageLink
+    };
+}
 
 async function getImageText(imageUrl) {
     let text = undefined;
@@ -141,12 +159,4 @@ async function getImageText(imageUrl) {
         console.log(error);
     }
     return text.toLowerCase();
-}
-
-async function mapImageWithText(imageLink) {
-    const imageText = await getImageText(imageLink);
-     return {
-         'text' : imageText,
-         'link' : imageLink
-     };
 }
