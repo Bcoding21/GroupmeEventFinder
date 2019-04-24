@@ -27,7 +27,7 @@ const config = require('./config.json');
 */
 const MILLISECONDS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
-const WAIT_TIME = Number.parseInt(config.WAIT_TIME) * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
+const WAIT_TIME = 30000;//Number.parseInt(config.WAIT_TIME) * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
 console.log(WAIT_TIME);
 const KEY_WORDS_FILE_PATH = 'keywords.txt';
 const visionClient = new vision.ImageAnnotatorClient();
@@ -35,6 +35,7 @@ const IMAGE_URL_REGEX = /https:\/\/i.groupme.com\/[0-9]{3,4}x[0-9]{3,4}\.(jpeg|p
 const EVENTBRITE_REGEX = /https:\/\/www.eventbrite.com\/e\/[a-zA-z\-0-9]+/
 const GROUP_ME_BASE_IMAGE_URL = '/i.groupme.com';
 const EVENTBRITE_URL = 'eventbrite.com'
+const KEYWORDS = readKeywords();
 
 main();
 
@@ -45,115 +46,84 @@ async function main() {
     const keywords = readKeywords();
 
     while (true) {
-        const groupsMessagesPromises = groupIds.map(async groupId => {
+
+        groupIds.forEach(async groupId => {
             const lastMessageId = groupIdToLastMessageId[groupId];
             const messages = await groupme.getMessagesAfter(groupId, lastMessageId);
-            return messages;
-        });
 
-        const groupsMessages = await Promise.all(groupsMessagesPromises);
-
-        groupsMessages.forEach(messages => {
             if (messages.length === 0) {
                 return;
             }
+
             const mostRecentMessage = messages[messages.length - 1];
             const { id, group_id } = mostRecentMessage;
             groupIdToLastMessageId[group_id] = id;
+
+            const texts = messages.map(message => {
+                const text = message.text || "";
+                const lowerCaseText = text.toLowerCase();
+                return lowerCaseText;
+            });
+
+            getValidImageUrlsFromTexts(texts)
+                .then(urls => {
+                    urls.forEach(groupme.postMessage);
+                });
+
+            let attachments = messages.map(message => message.attachments);
+            attachments = attachments.flat();
+            getValidUrlsFromAttachments(attachments)
+                .then(urls => {
+                    urls.forEach(groupme.postMessage);
+                });
+
+            const links = texts.filter(text => text.includes(EVENTBRITE_URL));
+            links.forEach(groupme.postMessage);
         });
 
-        const messages = groupsMessages.flat();
-        const didFindNewMessages = messages.length > 0;
-        console.log('---------------');
-        if (didFindNewMessages) {
-            console.log(`new Messages found: ${messages.length}`);
-            writeLastMessageIds(groupIdToLastMessageId);
-
-            messages.forEach(ensureTextExist);
-            messages.forEach(message => message.text = message.text.toLowerCase());
-
-
-            getValidImageUrlsFromText(messages, keywords)
-                .then(urls => {
-                    console.log(`Urls from text: ${urls.length}`);
-                    urls.forEach(groupme.postMessage);
-                });
-
-            getValidUrlsFromAttachments(messages, keywords)
-                .then(urls => {
-                    console.log(`Urls from attachments: ${urls.length}`);
-                    urls.forEach(groupme.postMessage);
-                });
-
-            const links = getEventbriteLinks(messages);
-            console.log(`Eventbrite links: ${links.length}`);
-            links.forEach(groupme.postMessage);
-        }
+        writeLastMessageIds(groupIdToLastMessageId);
         await new Promise(resolve => setTimeout(resolve, WAIT_TIME));
     }
 }
 
-/**
- * @param {Message[]} messages
- * @returns {string[]}
- */
-function getEventbriteLinks(messages) {
-    return messages
-        .map(message => message.text)
-        .filter(text => text.includes(EVENTBRITE_URL))
-}
-
-/**
- * @param {Message[]} messages 
- * @param {string[]} keywords
- * @returns {Promise<string[]>} 
- */
-async function getValidUrlsFromAttachments(messages, keywords) {
-    const imageUrls = messages
-        .filter(message => message.attachments.length > 0)
+async function getValidUrlsFromAttachments(attachments) {
+    const imageUrls = attachments
         .filter(hasImageAttachment)
-        .map(getImageUrlFromAttachment);
+        .map(getImageUrlFromAttachments);
 
-    const promises = imageUrls.map(async (url) => {
-        let imageText = await getImageText(url);
-        imageText = imageText.toLowerCase();
-
-        const hasKeyword = keywords.some(keyword => {
-            return imageText.includes(keyword);
-        });
-        return hasKeyword ? url : null;
-    });
-
-    let validUrls = await Promise.all(promises);
-    validUrls = validUrls.filter(url => url);
-    return validUrls;
-}
-
-/**
- * 
- * @param {Message[]} messages 
- * @param {string[]} keywords
- * @returns {Promise<string[]>} 
- */
-async function getValidImageUrlsFromText(messages, keywords) {
-    const imageUrls = messages
-        .filter(message => message.text)
-        .map(message => message.text)
-        .filter(hasImageUrlInText)
-        .map(extractImageUrlFromText);
-
-    let validImageUrls = await Promise.all(imageUrls.map(async (url) => {
-        let imageText = await getImageText(url);
-        imageText = imageText.toLowerCase();
-
-        const hasKeyword = keywords.some(keyword => {
-            return imageText.includes(keyword);
-        });
+    const results = await Promise.all(imageUrls.map(async (url) => {
+        const hasKeyword = await isKeywordInImage(url);
         return hasKeyword ? url : null;
     }));
 
-    validImageUrls = validImageUrls.filter(url => url);
+    const validUrls = results.filter(url => url); // remove nulls from list
+    return validUrls;
+}
+
+async function getValidImageUrlsFromTexts(texts) {
+    const imageUrls = texts.filter(hasImageUrlInText)
+        .map(extractImageUrlFromText);
+
+    const results = await Promise.all(imageUrls.map(async url => {
+        const hasKeyword = await isKeywordInImage(url);
+        return hasKeyword ? url : null;
+    }));
+
+    const validImageUrls = results.filter(url => url); // remove nulls from list
     return validImageUrls;
+}
+
+async function isKeywordInImage(url) {
+    const textInImage = await getImageText(url);
+
+    const textAsLowerCase =
+        textInImage.toLowerCase().replace(/\W/g, '');
+
+    const hasKeyword = KEYWORDS.some(keyword => {
+        return textAsLowerCase.includes(keyword);
+    });
+
+    return hasKeyword;
 }
 
 /**
@@ -163,10 +133,6 @@ async function getValidImageUrlsFromText(messages, keywords) {
  */
 function hasImageUrlInText(text) {
     return text.includes(GROUP_ME_BASE_IMAGE_URL);
-}
-
-function ensureTextExist(message) {
-    message.text = message.text || "";
 }
 
 /**
@@ -243,26 +209,17 @@ function writeLastMessageIds(groupIdToLastMessageId) {
     });
 }
 
-/**
- * 
- * @param {Message} message 
- */
-function hasImageAttachment(message) {
-    return message.attachments.some(attachment => {
+function hasImageAttachment(attachments) {
+    return attachments.some(attachment => {
         return attachment.type === 'image';
     });
 }
 
-/**
- * 
- * @param {Message} message 
- * @returns {ImageAttachment}
- */
-function getImageUrlFromAttachment(message) {
-    const attachment = message.attachments.find(attachment => {
+function getImageUrlFromAttachments(attachments) {
+    const { url } = attachments.find(attachment => {
         return attachment.type == 'image';
     });
-    return attachment ? attachment.url : null;
+    return url;
 }
 
 /**
@@ -276,7 +233,7 @@ async function getImageText(imageUrl) {
         const [result] = await visionClient.textDetection(imageUrl);
         const detections = result.textAnnotations;
         const words = detections.map(text => text.description);
-        text = words.join('').replace(/[\n]/g, '');
+        text = words.join('');
     } catch (error) {
         console.log(error);
     }
